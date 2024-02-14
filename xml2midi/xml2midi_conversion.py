@@ -339,8 +339,9 @@ def process_score(in_str):
         update_dynamics(score_part, midi_part, beat_cdf)
         update_artics(score_part, midi_part, beat_cdf)
 
-    randomize_note_times(midi=midi, mean_shift=0, stdev_shift=0.04, mean_dur=1, stdev_dur=0.02)
+    randomize_note_times(midi=midi, mean_shift=0, stdev_shift=0.1, mean_dur=1, stdev_dur=0.2)
     add_pitch_bends(midi=midi, lambda_occur=2, mean_delta=0, stdev_delta=np.sqrt(1000), step_size=0.01)
-    add_screwups(midi=midi, lambda_occur=0.03, stdev_pitch_delta=1)
+    add_screwups(midi=midi, lambda_occur=0.1, stdev_pitch_delta=1)
+    print("".join([in_str, '_modified.midi']))
     midi.write("".join([in_str, '_modified.midi']))
     pass
