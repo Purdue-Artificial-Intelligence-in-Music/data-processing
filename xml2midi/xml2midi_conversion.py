@@ -12,6 +12,8 @@ def get_tempo_markings(score):
         if type(n) == tempo.MetronomeMark:
             tempo_markings[n.offset] = n.getQuarterBPM()
     tempo_markings = list(tempo_markings.items())
+    if tempo_markings == []:
+        return [(0, 120.0)]
     return tempo_markings
 
 
@@ -79,14 +81,20 @@ def get_cresc_desc(part):
     span_dyn_list = []
     for n in part.flatten().recurse():
         if type(n) == dynamics.Crescendo:
-            if len(n) != 2:
+            print(n)
+            if len(n) > 2:
                 raise Exception("Cresc has too many objects")
-            span_dyn_list.append((n[0].offset, n[1].offset, "cresc"))
-
+            elif len(n) == 1:
+                span_dyn_list.append((n[0].offset, n[0].offset + n[0].duration.quarterLength, "cresc"))
+            else:
+                span_dyn_list.append((n[0].offset, n[1].offset, "cresc"))
         if type(n) == dynamics.Diminuendo:
-            if len(n) != 2:
+            if len(n) > 2:
                 raise Exception("Dim has too many objects")
-            span_dyn_list.append((n[0].offset, n[1].offset, "dim"))
+            elif len(n) == 1:
+                span_dyn_list.append((n[0].offset, n[0].offset + n[0].duration.quarterLength, "dim"))
+            else:
+                span_dyn_list.append((n[0].offset, n[1].offset, "dim"))
     span_dyn_list.sort(key=(lambda x: x[0]))
     return span_dyn_list
 
@@ -221,6 +229,19 @@ def randomize_velocity(midi, stdev_vel):
             if note.velocity < 1:
                 note.velocity = 1
 
+def find_closest_marking(markings, time, key=(lambda x : x.start)):
+    if len(markings) < 1:
+        return None
+    closest = markings[0]
+    min_t = abs(key(marking) - time)
+    for marking in markings:
+        dt = abs(key(marking) - time)
+        if dt < min_t:
+            closest = marking
+            min_t = dt
+    return closest
+
+
 
 def get_closest_prev_time(markings, i_time, idx):
     if len(markings) == 0:
@@ -306,16 +327,15 @@ def update_artics(score_part, midi_part, beat_cdf):
             track_ar[ar[1]] = 0
         track_ar[ar[1]] += ar[2]
         cc_num = 0
-        match ar[1]:
-            case "staccato":
+        if ar[1] == "staccato":
                 cc_num = 20
-            case "tenuto":
-                cc_num = 21
-            case "marcato":
-                cc_num = 22
-            case "accent":
-                cc_num = 23
-            case "slur":
+        elif ar[1] == "tenuto":
+            cc_num = 21
+        elif ar[1] == "strong accent":
+            cc_num = 22
+        elif ar[1] == "accent":
+            cc_num = 23
+        elif ar[1] == "slur":
                 cc_num = 24
         if track_ar[ar[1]] > 0:
             midi_part.control_changes.append(pm.ControlChange(cc_num, 127, ar[0]))
@@ -327,7 +347,7 @@ def process_score(in_str):
     score = converter.parse("".join([in_str, '.musicxml']))
     _ = score.write('midi', "".join([in_str, '.midi']))
     midi = pm.PrettyMIDI("".join([in_str, '.midi']))
-
+    
     tempo_markings = get_tempo_markings(score)
     beat_cdf = get_beat_cdf(tempo_markings)
 
@@ -338,10 +358,41 @@ def process_score(in_str):
         # Dynamics
         update_dynamics(score_part, midi_part, beat_cdf)
         update_artics(score_part, midi_part, beat_cdf)
-
-    randomize_note_times(midi=midi, mean_shift=0, stdev_shift=0.1, mean_dur=1, stdev_dur=0.2)
-    add_pitch_bends(midi=midi, lambda_occur=2, mean_delta=0, stdev_delta=np.sqrt(1000), step_size=0.01)
-    add_screwups(midi=midi, lambda_occur=0.1, stdev_pitch_delta=1)
+        
+    #randomize_note_times(midi=midi, mean_shift=0, stdev_shift=0.04, mean_dur=1, stdev_dur=0.02)
+    add_pitch_bends(midi=midi, lambda_occur=2, mean_delta=0, stdev_delta=np.sqrt(500), step_size=0.01)
+    #add_screwups(midi=midi, lambda_occur=0.03, stdev_pitch_delta=1)
     print("".join([in_str, '_modified.midi']))
     midi.write("".join([in_str, '_modified.midi']))
+    
     pass
+
+def remove_notes(midi, time, delta):
+    for inst in midi.instruments:
+        for note in inst.notes:
+            if abs(note.start - time) < delta or abs(note.end - time) < delta:
+                inst.notes.remove(note)
+
+def add_extra_notes(midi, time, lambda_occur, stdev_pitch_delta, stdev_dur):
+    for inst in midi.instruments:
+        notes = inst.notes
+        if len(notes) < 1:
+            continue
+        notes.sort(key=(lambda x : x.start))
+        closest_idx = 0
+        min_t = abs(notes[closest_idx].start - time)
+        for i in range(len(notes)):
+            dt = abs(notes[i].start - time)
+            if dt < min_t:
+                closest_idx = i
+                min_t = dt
+        time_before = 0.0 if closest_idx == 0 else notes[closest_idx - 1].end
+        time_after = time if closest_idx == len(notes) - 1 else notes[closest_idx + 1].start
+        note = notes[closest_idx]
+        notes.remove(note)
+        occurrences = rn().poisson(lam=lambda_occur * inst.notes[len(inst.notes) - 1].end)
+        for iter in range(occurrences):
+            dur = abs(min(rn().normal(loc=0, scale=stdev_dur)))
+            time = rn().uniform(low=time_before, high=time_after-dur)
+            pitch_delta = int(np.round(rn().normal(loc=0, scale=stdev_pitch_delta)))
+            inst.notes.append(pm.Note(velocity=note.velocity, pitch=note.pitch+pitch_delta, start = time, end=time+dur))
