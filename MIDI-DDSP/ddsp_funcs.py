@@ -229,6 +229,7 @@ def modify_params_with_artic_full(midi, conditioning_df, inst_id, synthesis_gene
     '''
 
     stacc_list = get_notes_with_artic(midi, conditioning_df, inst=inst, midi_cc=20)
+    # print(stacc_list)
     tenuto_list = get_notes_with_artic(midi, conditioning_df, inst=inst, midi_cc=21)
     marc_list = get_notes_with_artic(midi, conditioning_df, inst=inst, midi_cc=22)
     accent_list = get_notes_with_artic(midi, conditioning_df, inst=inst, midi_cc=23)
@@ -248,11 +249,11 @@ def modify_params_with_artic_full(midi, conditioning_df, inst_id, synthesis_gene
         else:
             blank_row = conditioning_df.loc[0].copy()
             blank_row.loc["offset"] = conditioning_df.loc[idx, "offset"]
-            conditioning_df.loc[idx, "offset"] = min(conditioning_df.loc[idx, "onset"], conditioning_df.loc[idx, "offset"] - shorten_length)
-            conditioning_df.loc[idx, "note_length"] = min(0, conditioning_df.loc[idx, "note_length"] - shorten_length)
+            conditioning_df.loc[idx, "offset"] = max(conditioning_df.loc[idx, "onset"], conditioning_df.loc[idx, "offset"] - shorten_length)
+            conditioning_df.loc[idx, "note_length"] = max(0, conditioning_df.loc[idx, "note_length"] - shorten_length)
             blank_row.loc["onset"] = conditioning_df.loc[idx, "offset"]
             blank_row.loc["note_length"] = blank_row.loc["offset"] - blank_row.loc["onset"]
-            rows_to_add.append(idx, blank_row)
+            rows_to_add.append((idx, blank_row.astype('int64')))
     for idx in marc_list:
         conditioning_df.loc[idx, "brightness"] = max(conditioning_df.loc[idx, "brightness"] * 1.1, 1.0)
         conditioning_df.loc[idx, "vibrato"] = conditioning_df.loc[idx, "vibrato"] / 5.0
@@ -266,11 +267,11 @@ def modify_params_with_artic_full(midi, conditioning_df, inst_id, synthesis_gene
         else:
             blank_row = conditioning_df.loc[0].copy()
             blank_row.loc["offset"] = conditioning_df.loc[idx, "offset"]
-            conditioning_df.loc[idx, "offset"] = min(conditioning_df.loc[idx, "onset"], conditioning_df.loc[idx, "offset"] - shorten_length)
-            conditioning_df.loc[idx, "note_length"] = min(0, conditioning_df.loc[idx, "note_length"] - shorten_length)
+            conditioning_df.loc[idx, "offset"] = max(conditioning_df.loc[idx, "onset"], conditioning_df.loc[idx, "offset"] - shorten_length)
+            conditioning_df.loc[idx, "note_length"] = max(0, conditioning_df.loc[idx, "note_length"] - shorten_length)
             blank_row.loc["onset"] = conditioning_df.loc[idx, "offset"]
             blank_row.loc["note_length"] = blank_row.loc["offset"] - blank_row.loc["onset"]
-            rows_to_add.append(idx, blank_row)
+            rows_to_add.append((idx, blank_row.astype('int64')))
     for idx in accent_list:
         conditioning_df.loc[idx, "brightness"] = min(conditioning_df.loc[idx, "brightness"] * 1.1, 1.0)
         conditioning_df.loc[idx, "attack"] = min(max(conditioning_df.loc[idx, "attack"], 0.2) * 1.2, 1)
@@ -283,30 +284,40 @@ def modify_params_with_artic_full(midi, conditioning_df, inst_id, synthesis_gene
     for idx in tenuto_list:
         conditioning_df.loc[idx, "vibrato"] = conditioning_df.loc[idx, "vibrato"] / 2.0
         conditioning_df.loc[idx, "attack"] = conditioning_df.loc[idx, "attack"] * 0.8
+
+    
     for idx in rows_to_remove:
         for elem in rows_to_add:
             if idx == elem[0]:
-                rows_to_add.remove(elem[0])
+                rows_to_add.remove(elem)
             elif idx < elem[0]:
-                elem[0] -= 1
+                elem = (elem[0] - 1, elem[1])
         conditioning_df.drop(idx)
     for elem in rows_to_add:
         for elem2 in rows_to_add:
             if elem2[0] > elem[0]:
-                elem2[0] += 1
-        conditioning_df = pd.concat([conditioning_df.loc[:elem[0]], elem[1], conditioning_df.loc[elem[0]:]]).reset_index(drop=True)
-    
+                elem2 = (elem2[0] + 1, elem2[1])
+        # elem[1] = elem[1].astype('int64')
+        # print(type(elem[1]))
+        # print(elem[1])
+        conditioning_df = pd.concat([conditioning_df.loc[:elem[0]], elem[1].to_frame().T, conditioning_df.loc[elem[0]+1:]])
+
+    conditioning_df = conditioning_df.sort_values('onset').reset_index(drop=True)
+    # print(type(conditioning_df.tail(len(conditioning_df))['offset'].values[0]))
+
     df_copy = conditioning_df.copy()
 
+    # with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
+    #    print(conditioning_df)
+    # print(type(conditioning_df.tail(1)['offset'].values[0]))
     midi_audio, _, midi_synth_params = conditioning_df_to_audio(synthesis_generator, conditioning_df, tf.constant([inst_id]), display_progressbar=True)
 
     if not add_pitch_bends_slurs:
         midi_audio_changed = midi_audio
         f0_changed = None
+        conditioning_temp = conditioning_df
     else:
         slur_list = get_notes_with_artic(midi, conditioning_df, inst=inst, midi_cc=24)
-
-        conditioning_df
 
         curr_chain = []
         list_chains = []
@@ -513,7 +524,7 @@ def mono_midi_to_note_sequence(midi_data, instrument_id, inst_num=0, pitch_offse
   note_sequence['instrument_id'] = instrument_id
   return note_sequence
 
-def generate_audio_from_midi(synth_gen, express_gen, midi_path, instrument, inst_num=0):
+def generate_audio_from_midi(synth_gen, express_gen, midi_path, instrument, inst_num=0, add_pitch_bends_slurs=True):
     instrument_id = INST_NAME_TO_ID_DICT[instrument]
     midi = pretty_midi.PrettyMIDI(midi_path)
     note_sequence = mono_midi_to_note_sequence(midi,
@@ -524,7 +535,7 @@ def generate_audio_from_midi(synth_gen, express_gen, midi_path, instrument, inst
                                                         training=False)
     conditioning_df = expression_generator_output_to_conditioning_df(
         expression_generator_outputs['output'], note_sequence)
-    _, _, conditioning_df, midi_synth_params, f0_changed = modify_params_with_artic_full(midi, conditioning_df, instrument_id, synth_gen, inst=inst_num)
+    _, _, conditioning_df, midi_synth_params, f0_changed = modify_params_with_artic_full(midi, conditioning_df, instrument_id, synth_gen, inst=inst_num, add_pitch_bends_slurs=add_pitch_bends_slurs)
     midi_audio_changed = apply_cresc_desc(midi, midi_synth_params, synth_gen, instrument_id, f0_changed=f0_changed, inst_num=inst_num)
     return midi_audio_changed, conditioning_df, midi_synth_params
 

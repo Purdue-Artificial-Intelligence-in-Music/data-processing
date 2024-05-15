@@ -110,7 +110,7 @@ def get_artic(part):
         if type(n) == note.Note:
             for art in n.articulations:
                 artic_list.append((n.offset, art.name, 1))
-                artic_list.append((float(n.offset + n.duration.quarterLength), art.name, -1))
+                artic_list.append((float(n.offset + n.duration.quarterLength - 0.005), art.name, -1))
     artic_list.sort(key=(lambda x: x[0]))
     return artic_list
 
@@ -328,7 +328,7 @@ def update_artics(score_part, midi_part, beat_cdf):
         track_ar[ar[1]] += ar[2]
         cc_num = 0
         if ar[1] == "staccato":
-                cc_num = 20
+            cc_num = 20
         elif ar[1] == "tenuto":
             cc_num = 21
         elif ar[1] == "strong accent":
@@ -336,7 +336,7 @@ def update_artics(score_part, midi_part, beat_cdf):
         elif ar[1] == "accent":
             cc_num = 23
         elif ar[1] == "slur":
-                cc_num = 24
+            cc_num = 24
         if track_ar[ar[1]] > 0:
             midi_part.control_changes.append(pm.ControlChange(cc_num, 127, ar[0]))
         else:
@@ -360,7 +360,7 @@ def process_score(in_str):
         update_artics(score_part, midi_part, beat_cdf)
         
     #randomize_note_times(midi=midi, mean_shift=0, stdev_shift=0.04, mean_dur=1, stdev_dur=0.02)
-    add_pitch_bends(midi=midi, lambda_occur=2, mean_delta=0, stdev_delta=np.sqrt(500), step_size=0.01)
+    #add_pitch_bends(midi=midi, lambda_occur=2, mean_delta=0, stdev_delta=np.sqrt(500), step_size=0.01)
     #add_screwups(midi=midi, lambda_occur=0.03, stdev_pitch_delta=1)
     print("".join([in_str, '_modified.midi']))
     midi.write("".join([in_str, '_modified.midi']))
